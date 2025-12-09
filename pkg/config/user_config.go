@@ -380,6 +380,11 @@ type LogConfig struct {
 	ShowGraph string `yaml:"showGraph" jsonschema:"enum=always,enum=never,enum=when-maximised"`
 	// displays the whole git graph by default in the commits view (equivalent to passing the `--all` argument to `git log`)
 	ShowWholeGraph bool `yaml:"showWholeGraph"`
+
+	// Format string used to render each commit entry in the commits list panel.
+	// Supports placeholders like %h (short hash), %H (full hash), %s (subject),
+	// %an (author), etc. Defaults to "%h %s".
+	PaneLogFormat string `yaml:"paneLogFormat"`
 }
 
 type CommitPrefixConfig struct {
@@ -834,6 +839,7 @@ func GetDefaultConfig() *UserConfig {
 				Order:          "topo-order",
 				ShowGraph:      "always",
 				ShowWholeGraph: false,
+				PaneLogFormat:  "%h %an %s",
 			},
 			LocalBranchSortOrder:         "date",
 			RemoteBranchSortOrder:        "date",

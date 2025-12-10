@@ -464,11 +464,6 @@ git:
     # displays the whole git graph by default in the commits view (equivalent to
     # passing the `--all` argument to `git log`)
     showWholeGraph: false
-    
-    # Format string used to render each commit entry in the commits list panel.
-    # Supports placeholders like %h (short hash), %H (full hash), %s (subject),
-    # %an (author), etc. Defaults to "%h %as %s".
-    paneLogFormat: '%h %as %s'
 
   # How branches are sorted in the local branches view.
   # One of: 'date' (default) | 'recency' | 'alphabetical'

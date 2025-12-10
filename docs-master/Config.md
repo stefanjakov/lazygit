@@ -467,8 +467,8 @@ git:
 
     # Format string used to render each commit entry in the commits list panel.
     # Supports placeholders like %h (short hash), %H (full hash), %s (subject),
-    # %an (author), etc. Defaults to "%h %as %s".
-    paneLogFormat: '%h %as %s'
+    # %an (author), etc. Defaults to "%h %s".
+    paneLogFormat: '%d %as %g %s'
 
   # How branches are sorted in the local branches view.
   # One of: 'date' (default) | 'recency' | 'alphabetical'

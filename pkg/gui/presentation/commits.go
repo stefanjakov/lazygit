@@ -1,6 +1,7 @@
 package presentation
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -152,21 +153,55 @@ func GetCommitListDisplayStrings(
 		getGraphLine = func(int) string { return "" }
 	}
 
+	// Determine the hashes of the local branches for which we want to show a
+	// branch marker in the commits list. We only want to do this for branches
+	// that are not the current branch, and not any of the main branches. The
+	// goal is to visualize stacks of local branches, so anything that doesn't
+	// contribute to a branch stack shouldn't show a marker.
+	//
+	// If there are other branches pointing to the current head commit, we only
+	// want to show the marker if the rebase.updateRefs config is on.
+	branchHeadsToVisualize := set.NewFromSlice(lo.FilterMap(branches,
+		func(b *models.Branch, index int) (string, bool) {
+			return b.CommitHash,
+				// Don't consider branches that don't have a commit hash. As far
+				// as I can see, this happens for a detached head, so filter
+				// these out
+				b.CommitHash != "" &&
+					// Don't show a marker for the current branch
+					b.Name != currentBranchName &&
+					// Don't show a marker for main branches
+					!lo.Contains(common.UserConfig().Git.MainBranches, b.Name) &&
+					// Don't show a marker for the head commit unless the
+					// rebase.updateRefs config is on
+					(hasRebaseUpdateRefsConfig || b.CommitHash != commits[0].Hash())
+		}))
+
 	lines := make([][]string, 0, len(filteredCommits))
 	var bisectStatus BisectStatus
+	willBeRebased := markedBaseCommit == ""
 	for i, commit := range filteredCommits {
 		unfilteredIdx := i + startIdx
 		bisectStatus = getBisectStatus(unfilteredIdx, commit.Hash(), bisectInfo, bisectBounds)
+		isMarkedBaseCommit := commit.Hash() != "" && commit.Hash() == markedBaseCommit
+		if isMarkedBaseCommit {
+			willBeRebased = true
+		}
 		lines = append(lines, displayCommit(
 			common,
 			commit,
+			branchHeadsToVisualize,
+			hasRebaseUpdateRefsConfig,
 			cherryPickedCommitHashSet,
+			isMarkedBaseCommit,
+			willBeRebased,
 			diffName,
 			timeFormat,
 			shortTimeFormat,
 			now,
 			parseEmoji,
 			getGraphLine(unfilteredIdx),
+			fullDescription,
 			bisectStatus,
 			bisectInfo,
 		))
@@ -306,17 +341,21 @@ func getBisectStatusText(bisectStatus BisectStatus, bisectInfo *git_commands.Bis
 func displayCommit(
 	common *common.Common,
 	commit *models.Commit,
+	branchHeadsToVisualize *set.Set[string],
+	hasRebaseUpdateRefsConfig bool,
 	cherryPickedCommitHashSet *set.Set[string],
+	isMarkedBaseCommit bool,
+	willBeRebased bool,
 	diffName string,
 	timeFormat string,
 	shortTimeFormat string,
 	now time.Time,
 	parseEmoji bool,
 	graphLine string,
+	fullDescription bool,
 	bisectStatus BisectStatus,
 	bisectInfo *git_commands.BisectInfo,
 ) []string {
-
 	bisectString := getBisectStatusText(bisectStatus, bisectInfo)
 
 	hashString := ""
@@ -337,35 +376,88 @@ func displayCommit(
 		divergenceString = hashColor.Sprint(icons.IconForCommit(commit))
 	}
 
+	descriptionString := ""
+	if fullDescription {
+		descriptionString = style.FgBlue.Sprint(
+			utils.UnixToDateSmart(now, commit.UnixTimestamp, timeFormat, shortTimeFormat),
+		)
+	}
+
 	actionString := ""
 	if commit.Action != models.ActionNone {
 		actionString = actionColorMap(commit.Action, commit.Status).Sprint(commit.Action.String())
 	}
 
+	tagString := ""
+	if fullDescription {
+		if commit.ExtraInfo != "" {
+			tagString = style.FgMagenta.SetBold().Sprint(commit.ExtraInfo) + " "
+		}
+	} else {
+		if len(commit.Tags) > 0 {
+			tagString = theme.DiffTerminalColor.SetBold().Sprint(strings.Join(commit.Tags, " ")) + " "
+		}
+
+		if branchHeadsToVisualize.Includes(commit.Hash()) &&
+			commit.Status != models.StatusMerged &&
+			!(commit.IsTODO() && hasRebaseUpdateRefsConfig) {
+			tagString = style.FgCyan.SetBold().Sprint(
+				lo.Ternary(icons.IsIconEnabled(), icons.BRANCH_ICON, "*") + " " + tagString)
+		}
+	}
+
+	name := commit.Name
+	if commit.Action == todo.UpdateRef {
+		name = strings.TrimPrefix(name, "refs/heads/")
+	}
+	if parseEmoji {
+		name = emoji.Sprint(name)
+	}
+
+	mark := ""
+	if commit.Status == models.StatusConflicted {
+		youAreHere := style.FgRed.Sprintf("<-- %s ---", common.Tr.ConflictLabel)
+		mark = fmt.Sprintf("%s ", youAreHere)
+	} else if isMarkedBaseCommit {
+		rebaseFromHere := style.FgYellow.Sprint(common.Tr.MarkedCommitMarker)
+		mark = fmt.Sprintf("%s ", rebaseFromHere)
+	} else if !willBeRebased {
+		willBeRebasedText := style.FgYellow.Sprint("✓")
+		mark = fmt.Sprintf("%s ", willBeRebasedText)
+	}
+
 	authorLength := common.UserConfig().Gui.CommitAuthorShortLength
+	if fullDescription {
+		authorLength = common.UserConfig().Gui.CommitAuthorLongLength
+	}
 	author := authors.AuthorWithLength(commit.AuthorName, authorLength)
 
 	format := common.UserConfig().Git.Log.PaneLogFormat
-	text := theme.DefaultTextColor.Sprint(
-		applyPaneLogFormat(
-			format,
-			commit,
-			hashString,
-			author, // authorShort
-			now,
-			timeFormat,
-			shortTimeFormat,
-			parseEmoji,
-		),
+	textInner := applyPaneLogFormat(
+		format,
+		commit,
+		hashString,
+		author,
+		now,
+		timeFormat,
+		shortTimeFormat,
+		parseEmoji,
+		tagString,
+		graphLine,
 	)
 
-	cols := []string{
+	finalText := mark + theme.DefaultTextColor.Sprint(textInner)
+
+	cols := make([]string, 0, 7)
+	cols = append(
+		cols,
 		divergenceString,
-		graphLine,
+		hashString,
 		bisectString,
+		descriptionString,
 		actionString,
-		text,
-	}
+		finalText,
+	)
 
 	return cols
 }
@@ -379,8 +471,9 @@ func applyPaneLogFormat(
 	timeFormat string,
 	shortTimeFormat string,
 	parseEmoji bool,
+	decoration string,
+	graphLine string,
 ) string {
-
 	out := format
 
 	out = strings.ReplaceAll(out, "%h", shortHashColored)
@@ -411,11 +504,13 @@ func applyPaneLogFormat(
 	)
 	out = strings.ReplaceAll(out, "%ar", relDate)
 
-	dec := ""
-	if len(commit.Tags) > 0 {
-		dec = "(" + strings.Join(commit.Tags, ", ") + ")"
-	}
-	out = strings.ReplaceAll(out, "%d", dec)
+	out = strings.ReplaceAll(out, "%d", decoration)
+
+	out = strings.Join(strings.Fields(out), " ")
+
+	out = strings.ReplaceAll(out, "%g", graphLine)
+
+	out = strings.Join(strings.Fields(out), " ")
 
 	return out
 }

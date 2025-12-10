@@ -839,7 +839,7 @@ func GetDefaultConfig() *UserConfig {
 				Order:          "topo-order",
 				ShowGraph:      "always",
 				ShowWholeGraph: false,
-				PaneLogFormat:  "%h %an %s",
+				PaneLogFormat:  "%h %as %s",
 			},
 			LocalBranchSortOrder:         "date",
 			RemoteBranchSortOrder:        "date",

@@ -411,7 +411,7 @@ func displayCommit(
 		name = strings.TrimPrefix(name, "refs/heads/")
 	}
 	if parseEmoji {
-		name = emoji.Sprint(name)
+		emoji.Sprint(name)
 	}
 
 	mark := ""
